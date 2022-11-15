@@ -27,6 +27,10 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
+// dump logger parameters
+const PerFile = 100
+const PerFolder = 10000
+
 // set by the precompile module, to avoid a package dependence cycle
 var ArbRetryableTxAddress common.Address
 var ArbSysAddress common.Address
@@ -415,6 +419,30 @@ func ProduceBlockAdvanced(
 	header.Root = statedb.IntermediateRoot(true)
 
 	block := types.NewBlock(header, complete, nil, receipts, trie.NewStackTrie(nil))
+	fmt.Printf("Block %v: hash = %v, num txn = %v\n", block.NumberU64(), block.Hash, len(block.Transactions()))
+	// dump block data
+	if err := BlockDumpLogger(block, PerFolder, PerFile); err != nil {
+		fmt.Printf("BlockDumpLogger: %v\n", err)
+		return nil, nil, err
+	}
+	// dump receipt data
+	if err := ReceiptDumpLogger(block.NumberU64(), PerFolder, PerFile, receipts); err != nil {
+		fmt.Printf("ReceiptDumpLogger: %v\n", err)
+		return nil, nil, err
+	}
+	// dump txn data
+	txLogger, err := NewTxLogger(
+		types.MakeSigner(chainConfig, header.Number),
+		chainConfig.IsLondon(block.Number()),
+		header.BaseFee,
+		block.Hash(),
+		block.NumberU64(), PerFolder, PerFile,
+	)
+	for idx, txn := range block.Transactions() {
+		if err := txLogger.Dump(idx, txn, receipts[idx]); err != nil {
+			return nil, nil, fmt.Errorf("could not dump tx %d [%v] logger: %w", idx, txn.Hash().Hex(), err)
+		}
+	}
 
 	if len(block.Transactions()) != len(receipts) {
 		return nil, nil, fmt.Errorf("block has %d txes but %d receipts", len(block.Transactions()), len(receipts))
