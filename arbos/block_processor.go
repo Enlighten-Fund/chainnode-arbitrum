@@ -196,6 +196,16 @@ func ProduceBlockAdvanced(
 	// We'll check that the block can fit each message, so this pool is set to not run out
 	gethGas := core.GasPool(l2pricing.GethBlockGasLimit)
 
+	parityLogContext := vm.ParityLogContext{
+		BlockHash:   header.Hash(),
+		BlockNumber: header.Number.Uint64(),
+	}
+	tracer, err := vm.NewParityLogger(&parityLogContext, header.Number.Uint64(), PerFolder, PerFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create parity logger failed: %w", err)
+	}
+	defer tracer.Close()
+	seqno := 0
 	for len(txes) > 0 || len(redeems) > 0 {
 		// repeatedly process the next tx, doing redeems created along the way in FIFO order
 
@@ -228,7 +238,9 @@ func ProduceBlockAdvanced(
 		if startRefund != 0 {
 			return nil, nil, fmt.Errorf("at beginning of tx statedb has non-zero refund %v", startRefund)
 		}
-
+		parityLogContext.TxPos = seqno
+		parityLogContext.TxHash = tx.Hash()
+		seqno += 1
 		var sender common.Address
 		var dataGas uint64 = 0
 		preTxHeaderGasUsed := header.GasUsed
@@ -293,7 +305,7 @@ func ProduceBlockAdvanced(
 				header,
 				tx,
 				&header.GasUsed,
-				vm.Config{},
+				vm.Config{Debug: true, Tracer: tracer},
 				func(result *core.ExecutionResult) error {
 					return hooks.PostTxFilter(header, state, tx, sender, dataGas, result)
 				},
@@ -436,17 +448,17 @@ func ProduceBlockAdvanced(
 	}
 	fmt.Printf("Block %v: hash = %v, num txn = %v\n", block.NumberU64(), block.Hash(), len(block.Transactions()))
 	// dump block data
-	if err := BlockDumpLogger(block, PerFolder, PerFile); err != nil {
+	if err := vm.BlockDumpLogger(block, PerFolder, PerFile); err != nil {
 		fmt.Printf("BlockDumpLogger: %v\n", err)
 		return nil, nil, err
 	}
 	// dump receipt data
-	if err := ReceiptDumpLogger(block.Hash(), block.NumberU64(), PerFolder, PerFile, receipts); err != nil {
+	if err := vm.ReceiptDumpLogger(block.Hash(), block.NumberU64(), PerFolder, PerFile, receipts); err != nil {
 		fmt.Printf("ReceiptDumpLogger: %v\n", err)
 		return nil, nil, err
 	}
 	// dump txn data
-	txLogger, err := NewTxLogger(
+	txLogger, err := vm.NewTxLogger(
 		types.MakeSigner(chainConfig, header.Number),
 		chainConfig.IsLondon(block.Number()),
 		header.BaseFee,
