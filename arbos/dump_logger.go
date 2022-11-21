@@ -78,7 +78,7 @@ type ParityLogger struct {
 	items             []*ParityTraceItem
 }
 
-func ReceiptDumpLogger(blockNumber uint64, perFolder, perFile uint64, receipts types.Receipts) error {
+func ReceiptDumpLogger(blockHash common.Hash, blockNumber uint64, perFolder, perFile uint64, receipts types.Receipts) error {
 	file, err := getFile("receipts", blockNumber, perFolder, perFile)
 	if err != nil {
 		return err
@@ -87,7 +87,10 @@ func ReceiptDumpLogger(blockNumber uint64, perFolder, perFile uint64, receipts t
 	encoder := json.NewEncoder(file)
 	for _, receipt := range receipts {
 		for _, log := range receipt.Logs {
+			oldHash := log.BlockHash
+			log.BlockHash = blockHash
 			err := encoder.Encode(log)
+			log.BlockHash = oldHash
 			if err != nil {
 				return fmt.Errorf("encode log failed: %w", err)
 			}
@@ -148,6 +151,7 @@ func (t *TxLogger) Dump(index int, tx *types.Transaction, receipt *types.Receipt
 		"effectiveGasPrice": effectiveGasPrice,
 		"type":              tx.Type(),
 		"value":             tx.Value(),
+		"status":            receipt.Status,
 	}
 	if err := t.encoder.Encode(entry); err != nil {
 		return fmt.Errorf("failed to encode transaction entry %w", err)
