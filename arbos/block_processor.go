@@ -474,6 +474,8 @@ func ProduceBlockAdvanced(
 			return nil, nil, fmt.Errorf("could not dump tx %d [%v] logger: %w", idx, txn.Hash().Hex(), err)
 		}
 	}
+	// dump trace data
+	tracer.Dump(block.Hash())
 
 	return block, receipts, nil
 }
