@@ -447,8 +447,12 @@ func ProduceBlockAdvanced(
 		}
 	}
 	fmt.Printf("Block %v: hash = %v, num txn = %v\n", block.NumberU64(), block.Hash(), len(block.Transactions()))
+	info, err := types.DeserializeHeaderExtraInformation(block.Header())
+	if err != nil {
+		return nil, nil, err
+	}
 	// dump block data
-	if err := vm.BlockDumpLogger(block, PerFolder, PerFile); err != nil {
+	if err := vm.BlockDumpLogger(block, info.L1BlockNumber, PerFolder, PerFile); err != nil {
 		fmt.Printf("BlockDumpLogger: %v\n", err)
 		return nil, nil, err
 	}
@@ -463,7 +467,9 @@ func ProduceBlockAdvanced(
 		chainConfig.IsLondon(block.Number()),
 		header.BaseFee,
 		block.Hash(),
-		block.NumberU64(), PerFolder, PerFile,
+		block.NumberU64(),
+		info.L1BlockNumber,
+		PerFolder, PerFile,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create tx logger failed: %w", err)

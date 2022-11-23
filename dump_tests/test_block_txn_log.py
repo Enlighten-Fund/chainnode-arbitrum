@@ -10,12 +10,11 @@ PER_FILE = 100
 FILE_PER_DIR = PER_DIR // PER_FILE
 
 DATA_DIR = Path("/data_ssd/yangdong/dump")
-# LOG_RANGE = list(range(387642, 387742))
-LOG_RANGE = list(range(387723, 387753))
+LOG_RANGE = list(range(404593, 404634))
 URL = "http://localhost:8547"
-# URL = "https://sparkling-young-waterfall.arbitrum-mainnet.discover.quiknode.pro/68005c1e3a5415e12c50decea2df79d8e843fe0e/"
 
 total_txn, total_log = 0, 0
+tot_txn_typ = []
 for logno in LOG_RANGE:
     unseen_txns = {}
     with open(DATA_DIR / "blocks" / f"{logno // FILE_PER_DIR}" / f"{logno}.log") as f:
@@ -53,6 +52,8 @@ for logno in LOG_RANGE:
             assert result["parentHash"] == rec["parentHash"]
             assert int(result["size"], 16) == rec["size"]
             assert int(result["timestamp"], 16) == rec["timestamp"]
+            assert int(result["l1BlockNumber"], 16) == rec["l1BlockNumber"]
+            assert int(result["baseFeePerGas"], 16) == rec["baseFeePerGas"]
             
             for txn in result["transactions"]:
                 unseen_txns[txn["hash"]] = txn
@@ -88,19 +89,22 @@ for logno in LOG_RANGE:
             assert rec["transactionIndex"] == int(result["transactionIndex"], 16)
             assert rec["type"] == int(result["type"], 16)
             assert rec["value"] == int(result["value"], 16)
+            # gasTipCap is meaningless for arbitrum Nitro.
             if rec["type"] in {0, 1, 100, 106}:
                 # legacy.
-                assert rec["gasTipCap"] == rec["gasFeeCap"] == rec["gasPrice"] == int(rec["effectiveGasPrice"], 16) == int(result["gasPrice"], 16), f"DUMPED:\n{rec}\nEXPECT:\n{result}"
-            elif rec["type"] in {2}:
+                assert rec["gasFeeCap"] == rec["gasPrice"] == int(result["gasPrice"], 16), f"DUMPED:\n{rec}\nEXPECT:\n{result}"
+            elif rec["type"] in {2, 104, 105}:
                 # EIP-1559
-                assert rec["effectiveGasPrice"] == result["gasPrice"]
                 assert rec["gasPrice"] == rec["gasFeeCap"] == int(result["maxFeePerGas"], 16)
-                assert rec["gasTipCap"] == int(result["maxPriorityFeePerGas"], 16)
-            elif rec["type"] in {104, 105}:
-                print(f"Skipping type {rec['type']} for now...")
             else:
                 assert False, f"Unseen transaction type {rec['type']}\nDUMPED\n{rec}\nExpect\n{result}"
+            optional = ["requestId","ticketId","maxRefund","submissionFeeRefund","refundTo","l1BaseFee","retryTo","retryValue","retryData","beneficiary","maxSubmissionFee"]
+            for field in optional:
+                assert (field in rec) == (field in result)
+                if field in rec:
+                    assert rec[field] == result[field]
             typ.append(rec["type"])
+            tot_txn_typ.append(rec["type"])
 
             payload = {
                 "jsonrpc": "2.0",
@@ -112,9 +116,11 @@ for logno in LOG_RANGE:
             assert response["jsonrpc"] == "2.0", f"{response}"
             assert int(response["id"]) == 1, f"{response}"
             result = response["result"]
+            assert rec["effectiveGasPrice"] == result["effectiveGasPrice"],  f"effectiveGasPrice differs\nDUMPED\n{rec}\nExpect\n{result}"
             assert rec["gasUsed"] == int(result["gasUsed"], 16)
-            # assert "status" in rec, rec
-            # assert rec["status"] == int(result["status"], 16)
+            assert rec["gasUsedForL1"] == int(result["gasUsedForL1"], 16)
+            assert rec["l1BlockNumber"] == int(result["l1BlockNumber"], 16)
+            assert rec["status"] == int(result["status"], 16)
             cl += len(result["logs"])
             for log in result["logs"]:
                 nkey = (log["blockNumber"], log["logIndex"])
@@ -136,3 +142,4 @@ for logno in LOG_RANGE:
     total_txn += txn_num
     total_log += cl
 print(f"OK! Verified {len(LOG_RANGE)*PER_FILE} blocks, {total_txn} txns, and {total_log} logs in total!")
+print(f"Txn type stat: {Counter(tot_txn_typ)}")

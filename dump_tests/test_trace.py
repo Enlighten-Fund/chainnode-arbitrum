@@ -65,6 +65,10 @@ for fc, fname in enumerate(files):
             ctrace["blockNumber"] = dtrace["blockNumber"]
             ctrace["transactionHash"] = dtrace["transactionHash"]
             ctrace["transactionPosition"] = dtrace["transactionPosition"]
+            def to_int(s):
+                return 0 if s == "0x" else int(s, 16)
+            if to_int(ctrace["action"]["value"]) == to_int(dtrace["action"]["value"]):
+                ctrace["action"]["value"] = dtrace["action"]["value"]
             assert ctrace == dtrace, f"Record differ\n{ctrace}\n{dtrace}"
     print(f"ok {fc+1}/{len(files)}")
 print("OK!")
