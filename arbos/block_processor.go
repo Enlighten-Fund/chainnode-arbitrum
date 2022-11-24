@@ -464,7 +464,6 @@ func ProduceBlockAdvanced(
 	// dump txn data
 	txLogger, err := vm.NewTxLogger(
 		types.MakeSigner(chainConfig, header.Number),
-		chainConfig.IsLondon(block.Number()),
 		header.BaseFee,
 		block.Hash(),
 		block.NumberU64(),
