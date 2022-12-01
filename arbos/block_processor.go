@@ -27,6 +27,10 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
+// dump logger parameters
+const PerFile = 100
+const PerFolder = 10000
+
 // set by the precompile module, to avoid a package dependence cycle
 var ArbRetryableTxAddress common.Address
 var ArbSysAddress common.Address
@@ -192,6 +196,16 @@ func ProduceBlockAdvanced(
 	// We'll check that the block can fit each message, so this pool is set to not run out
 	gethGas := core.GasPool(l2pricing.GethBlockGasLimit)
 
+	parityLogContext := vm.ParityLogContext{
+		BlockHash:   header.Hash(),
+		BlockNumber: header.Number.Uint64(),
+	}
+	tracer, err := vm.NewParityLogger(&parityLogContext, header.Number.Uint64(), PerFolder, PerFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create parity logger failed: %w", err)
+	}
+	defer tracer.Close()
+	seqno := 0
 	for len(txes) > 0 || len(redeems) > 0 {
 		// repeatedly process the next tx, doing redeems created along the way in FIFO order
 
@@ -224,7 +238,9 @@ func ProduceBlockAdvanced(
 		if startRefund != 0 {
 			return nil, nil, fmt.Errorf("at beginning of tx statedb has non-zero refund %v", startRefund)
 		}
-
+		parityLogContext.TxPos = seqno
+		parityLogContext.TxHash = tx.Hash()
+		seqno += 1
 		var sender common.Address
 		var dataGas uint64 = 0
 		preTxHeaderGasUsed := header.GasUsed
@@ -289,7 +305,7 @@ func ProduceBlockAdvanced(
 				header,
 				tx,
 				&header.GasUsed,
-				vm.Config{},
+				vm.Config{Debug: true, Tracer: tracer},
 				func(result *core.ExecutionResult) error {
 					return hooks.PostTxFilter(header, state, tx, sender, dataGas, result)
 				},
@@ -430,6 +446,41 @@ func ProduceBlockAdvanced(
 			log.Error("Unexpected total balance delta", "delta", balanceDelta, "expected", expectedBalanceDelta)
 		}
 	}
+	fmt.Printf("Block %v: hash = %v, num txn = %v\n", block.NumberU64(), block.Hash(), len(block.Transactions()))
+	info, err := types.DeserializeHeaderExtraInformation(block.Header())
+	if err != nil {
+		return nil, nil, err
+	}
+	// dump block data
+	if err := vm.BlockDumpLogger(block, info.L1BlockNumber, PerFolder, PerFile); err != nil {
+		fmt.Printf("BlockDumpLogger: %v\n", err)
+		return nil, nil, err
+	}
+	// dump receipt data
+	if err := vm.ReceiptDumpLogger(block.Hash(), block.NumberU64(), PerFolder, PerFile, receipts); err != nil {
+		fmt.Printf("ReceiptDumpLogger: %v\n", err)
+		return nil, nil, err
+	}
+	// dump txn data
+	txLogger, err := vm.NewTxLogger(
+		types.MakeSigner(chainConfig, header.Number),
+		header.BaseFee,
+		block.Hash(),
+		block.NumberU64(),
+		info.L1BlockNumber,
+		PerFolder, PerFile,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create tx logger failed: %w", err)
+	}
+	defer txLogger.Close()
+	for idx, txn := range block.Transactions() {
+		if err := txLogger.Dump(idx, txn, receipts[idx]); err != nil {
+			return nil, nil, fmt.Errorf("could not dump tx %d [%v] logger: %w", idx, txn.Hash().Hex(), err)
+		}
+	}
+	// dump trace data
+	tracer.Dump(block.Hash())
 
 	return block, receipts, nil
 }
