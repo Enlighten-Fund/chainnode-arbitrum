@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	time2 "time"
+
+	"github.com/offchainlabs/nitro/solgen/go/precompilesgen"
 
 	"github.com/offchainlabs/nitro/arbos/arbosState"
 	"github.com/offchainlabs/nitro/arbos/l2pricing"
 	"github.com/offchainlabs/nitro/arbos/util"
-	"github.com/offchainlabs/nitro/solgen/go/precompilesgen"
 	"github.com/offchainlabs/nitro/util/arbmath"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -204,7 +206,6 @@ func ProduceBlockAdvanced(
 	if err != nil {
 		return nil, nil, fmt.Errorf("create parity logger failed: %w", err)
 	}
-	defer tracer.Close()
 	seqno := 0
 	for len(txes) > 0 || len(redeems) > 0 {
 		// repeatedly process the next tx, doing redeems created along the way in FIFO order
@@ -452,14 +453,20 @@ func ProduceBlockAdvanced(
 		return nil, nil, err
 	}
 	// dump block data
+	start := time2.Now()
 	if err := vm.BlockDumpLogger(block, info.L1BlockNumber, PerFolder, PerFile); err != nil {
 		fmt.Printf("BlockDumpLogger: %v\n", err)
 		return nil, nil, err
+	} else {
+		fmt.Printf("block dump cost: %v\n", time2.Since(start))
 	}
 	// dump receipt data
+	start = time2.Now()
 	if err := vm.ReceiptDumpLogger(block.Hash(), block.NumberU64(), PerFolder, PerFile, receipts); err != nil {
 		fmt.Printf("ReceiptDumpLogger: %v\n", err)
 		return nil, nil, err
+	} else {
+		fmt.Printf("receipt dump cost: %v\n", time2.Since(start))
 	}
 	// dump txn data
 	txLogger, err := vm.NewTxLogger(
@@ -473,14 +480,21 @@ func ProduceBlockAdvanced(
 	if err != nil {
 		return nil, nil, fmt.Errorf("create tx logger failed: %w", err)
 	}
-	defer txLogger.Close()
 	for idx, txn := range block.Transactions() {
 		if err := txLogger.Dump(idx, txn, receipts[idx]); err != nil {
 			return nil, nil, fmt.Errorf("could not dump tx %d [%v] logger: %w", idx, txn.Hash().Hex(), err)
 		}
 	}
+	start = time2.Now()
+	txLogger.Close()
+	fmt.Printf("transactions dump cost: %v\n", time2.Since(start))
+
 	// dump trace data
 	tracer.Dump(block.Hash())
+
+	start = time2.Now()
+	tracer.Close()
+	fmt.Printf("trace dump cost: %v\n", time2.Since(start))
 
 	return block, receipts, nil
 }
